@@ -1,0 +1,17 @@
+# Node.js dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env
+.DS_Store
+
+# Ignore Webpack cache
+.cache/

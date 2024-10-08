@@ -1,0 +1,13 @@
+/* popup.css */
+
+body {
+    font-family: Arial, sans-serif;
+    width: 300px;
+    padding: 10px;
+  }
+  
+  #selected-image {
+    max-width: 100%;
+    margin-top: 10px;
+  }
+  
