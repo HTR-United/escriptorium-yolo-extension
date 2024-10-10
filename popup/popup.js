@@ -8,6 +8,7 @@ let ImageOriginalWidth = 0;
 let ImageOriginalHeight = 0;
 let modelFilesPath = '';
 let modelFiles = []; 
+let numClass = 41;
 
 function displayMessage(message) {
   const statusMessages = document.getElementById('status-messages');
@@ -162,15 +163,17 @@ document.getElementById('annotate-button').addEventListener('click', async () =>
       console.log("originalWidth",ImageOriginalWidth,"originalHeight",ImageOriginalHeight);
       console.log("image",img);
       try {
-        const predictions = await model.executeAsync(expandedImgTensor);
-        console.log('Predictions:', predictions); 
+        //const predictions = await model.executeAsync(expandedImgTensor);
+        //console.log('Predictions:', predictions); 
         //exportPredictions(predictions);
-        console.log("originalWidth",ImageOriginalWidth,"originalHeight",ImageOriginalHeight);
-        const blocks = extractBoundingBoxes(predictions, 0.5,ImageOriginalWidth, ImageOriginalHeight); // Use original dimensions here
-        
+        //console.log("originalWidth",ImageOriginalWidth,"originalHeight",ImageOriginalHeight);
+        //const blocks = extractBoundingBoxes(predictions, 0.5,ImageOriginalWidth, ImageOriginalHeight); // Use original dimensions here
+        const blocks = await detect(img, model);
+
+
         const apiToken = document.getElementById('api-token').value;
         const { pageId, blocksUrl } = await getBlocksUrl();
-        
+        console.log('Blocks:', blocks);
         await createBlocks(apiToken, blocksUrl, pageId, blocks);
         displayMessage('Blocks added successfully!');
         
@@ -303,6 +306,122 @@ async function exportPredictions(predictions) {
   const allAttributesData = await predictions.slice([0, 0, 0], [1, numAttributes, numDetections]).data();
   exportRawData(allAttributesData, `AllAttributes_`);
 }  
+
+
+const preprocess = (source, modelWidth, modelHeight) => {
+  let xRatio, yRatio; // ratios for boxes
+
+  const input = tf.tidy(() => {
+    const img = tf.browser.fromPixels(source);
+
+    // padding image to square => [n, m] to [n, n], n > m
+    const [h, w] = img.shape.slice(0, 2); // get source width and height
+    console.log("slice",img.shape.slice(0, 2));
+    const maxSize = Math.max(w, h); // get max size
+    const imgPadded = img.pad([
+      [0, maxSize - h], // padding y [bottom only]
+      [0, maxSize - w], // padding x [right only]
+      [0, 0],
+    ]);
+
+    xRatio = maxSize / w; // update xRatio
+    yRatio = maxSize / h; // update yRatio
+
+    return tf.image
+      .resizeBilinear(imgPadded, [modelWidth, modelHeight]) // resize frame
+      .div(255.0) // normalize
+      .expandDims(0); // add batch
+  });
+
+  return [input, xRatio, yRatio];
+};
+
+
+
+export const detect = async (source, model) => {
+  let rendered_boxes = [];
+  console.log("before slicing",model);
+  const [modelWidth, modelHeight] = model.inputs[0].shape.slice(1, 3); // get model width and height
+  console.log("after slicing");
+  tf.engine().startScope(); // start scoping tf engine
+  const [input, xRatio, yRatio] = preprocess(source, modelWidth, modelHeight); // preprocess image
+
+  const res = model.execute(input); // inference model
+  const transRes = res.transpose([0, 2, 1]); // transpose result [b, det, n] => [b, n, det]
+  const boxes = tf.tidy(() => {
+    const w = transRes.slice([0, 0, 2], [-1, -1, 1]); // get width
+    const h = transRes.slice([0, 0, 3], [-1, -1, 1]); // get height
+    const x1 = tf.sub(transRes.slice([0, 0, 0], [-1, -1, 1]), tf.div(w, 2)); // x1
+    const y1 = tf.sub(transRes.slice([0, 0, 1], [-1, -1, 1]), tf.div(h, 2)); // y1
+    return tf
+      .concat(
+        [
+          y1,
+          x1,
+          tf.add(y1, h), //y2
+          tf.add(x1, w), //x2
+        ],
+        2
+      )
+      .squeeze();
+  }); // process boxes [y1, x1, y2, x2]
+
+  const [scores, classes] = tf.tidy(() => {
+    // class scores
+    const rawScores = transRes.slice([0, 0, 4], [-1, -1, numClass]).squeeze(0); // #6 only squeeze axis 0 to handle only 1 class models
+    return [rawScores.max(1), rawScores.argMax(1)];
+  }); // get max scores and classes index
+
+  const nms = await tf.image.nonMaxSuppressionAsync(boxes, scores, 500, 0.45, 0.2); // NMS to filter boxes
+
+  const boxes_data = boxes.gather(nms, 0).dataSync(); // indexing boxes by nms index
+  const scores_data = scores.gather(nms, 0).dataSync(); // indexing scores by nms index
+  const classes_data = classes.gather(nms, 0).dataSync(); // indexing classes by nms index
+  //return [boxes_data, scores_data, classes_data, [xRatio, yRatio]]; // return boxes, scores, classes, and ratios
+  //return boxes_data;
+  console.log('before render');
+  rendered_boxes= renderBoxes( boxes_data, scores_data, classes_data, [xRatio, yRatio]); // render boxes
+  return rendered_boxes;
+  
+  //tf.dispose([res, transRes, boxes, scores, classes, nms]); // clear memory
+
+  //callback();
+
+  //tf.engine().endScope(); // end of scoping
+};
+
+export const renderBoxes = ( boxes_data, scores_data, classes_data, ratios) => {
+  let boxes = [];
+  console.log('scores_data',scores_data);
+  for (let i = 0; i < scores_data.length; ++i) {
+    // filter based on class threshold
+    // i need to get lables from the yaml file somehow
+    //const klass = labels[classes_data[i]];
+    const score = (scores_data[i] * 100).toFixed(1);
+
+    let [y1, x1, y2, x2] = boxes_data.slice(i * 4, (i + 1) * 4);
+    x1 *= ratios[0];
+    x2 *= ratios[0];
+    y1 *= ratios[1];
+    y2 *= ratios[1];
+    const width = x2 - x1;
+    const height = y2 - y1;
+    boxes.push({
+      box: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+      typology: null,
+      class: classes_data[i],
+      //confidence: maxProb
+    });
+  
+
+    
+
+    
+  }
+  console.log('Extracted boxes:', boxes);
+  return boxes;
+};
+
 
 async function createBlocks(apiToken, uri, pageId, blocks) {
   for (const block of blocks) {
