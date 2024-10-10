@@ -63,14 +63,16 @@
             <label for="api-token" class="col-sm-3 col-form-label">API Token</label>
             <div class="col-sm-9">
               <input type="password" id="api-token" class="form-control" placeholder="Enter API Token">
+              <button type="button" id="save-token" class="btn btn-secondary btn-sm" style="margin-top: 5px;">Save</button>
               <small class="form-text text-muted">Your API token will be used to access the image.</small>
             </div>
           </div>
           <div class="form-group row mb-3">
-            <label for="model-files" class="col-sm-3 col-form-label">Model Files</label>
+            <label for="model-files" class="col-sm-3 col-form-label">Model Folder</label>
             <div class="col-sm-9">
-              <input type="file" id="model-files" class="form-control" multiple accept=".json,.bin">
-              <small class="form-text text-muted">Upload model.json and all .bin files</small>
+              <input type="file" id="model-files" class="form-control" webkitdirectory multiple>
+              <button type="button" id="load-model" class="btn btn-primary" style="margin-top: 5px;">Load Model</button>
+              <small class="form-text text-muted">Upload model files from a folder (model.json and .bin files).</small>
             </div>
           </div>
           <div id="model-loaded-message" class="text-success" style="display: none;">Model loaded successfully <span class="checkmark">&#10003;</span></div>
@@ -80,7 +82,6 @@
                 <div class="col-sm-9">
                   <button type="button" id="get-current-image" class="btn btn-secondary">Get Current Image</button>
                   <small class="form-text text-muted">Fetch image from the current page to annotate</small>
-                  <button type="button" id="toggle-image" class="btn btn-secondary" style="display: none;">Show/Hide Image</button>
                   <div id="expandable-image-container" style="display: none;">
                     <img id="selected-image" src="#" alt="Selected Image" style="max-width: 100%; margin-top: 10px;">
                   </div>

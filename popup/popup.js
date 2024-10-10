@@ -6,6 +6,8 @@ let model = null;
 const inputSize = 960;
 let ImageOriginalWidth = 0;
 let ImageOriginalHeight = 0;
+let modelFilesPath = '';
+let modelFiles = []; 
 
 function displayMessage(message) {
   const statusMessages = document.getElementById('status-messages');
@@ -30,7 +32,8 @@ async function loadModelFromFiles(files) {
 
   if (!modelFile || weightFiles.length === 0) {
     console.error('Model file or weight files are missing');
-    return null;
+    alert('Please ensure the folder contains model.json and .bin files.');
+    return;
   }
 
   console.log('Loading model from selected files...');
@@ -40,10 +43,72 @@ async function loadModelFromFiles(files) {
   document.getElementById('annotate-button').disabled = false;
 }
 
-document.getElementById('model-files').addEventListener('change', (event) => {
-  const files = Array.from(event.target.files);
-  loadModelFromFiles(files);
+async function loadApiToken() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(['apiToken'], (result) => {
+      if (result.apiToken) {
+        document.getElementById('api-token').value = result.apiToken;
+      }
+      resolve(result.apiToken);
+    });
+  });
+}
+
+async function saveApiToken(token) {
+  chrome.storage.sync.set({ apiToken: token }, () => {
+    console.log('API Token saved');
+    displayMessage('API Token saved successfully!');
+  });
+}
+
+async function cacheModelPath(path) {
+  chrome.storage.sync.set({ modelFilesPath: path }, () => {
+    console.log('Model folder path cached');
+  });
+}
+
+async function loadCachedModelPath() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(['modelFilesPath'], (result) => {
+      modelFilesPath = result.modelFilesPath || '';
+      resolve(modelFilesPath);
+    });
+  });
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadApiToken(); 
+  await loadCachedModelPath();
 });
+
+document.getElementById('model-files').addEventListener('change', (event) => {
+  modelFiles = Array.from(event.target.files); 
+
+  // if any files are selected
+  if (modelFiles.length > 0) {
+    const folderPath = modelFiles[0].webkitRelativePath.split('/')[0]; 
+    cacheModelPath(folderPath); 
+    console.log("folderPath",folderPath);
+  }
+});
+
+document.getElementById('load-model').addEventListener('click', async () => {
+  if (modelFiles.length === 0) {
+    alert('Please select a folder containing the model files first.');
+    return;
+  }
+
+  await loadModelFromFiles(modelFiles); 
+});
+document.getElementById('save-token').addEventListener('click', () => {
+  const apiToken = document.getElementById('api-token').value;
+  if (!apiToken) {
+    alert("Please enter a valid API token to save.");
+    return;
+  }
+  saveApiToken(apiToken);
+});
+
 
 document.getElementById('get-current-image').addEventListener('click', () => {
   const apiToken = document.getElementById('api-token').value;
@@ -74,35 +139,19 @@ chrome.runtime.onMessage.addListener((request) => {
       console.log('Original image size:', request.originalSize[0], request.originalSize[1]); 
       img.onload = () => {
         displayMessage('Image loaded successfully');
-        document.getElementById('toggle-image').style.display = 'inline';
-        if (toggleButton.style.display === 'none' || toggleButton.style.display === '') {
-            toggleButton.style.display = 'inline'; 
-            toggleButton.textContent = 'Show Image'; 
-        }
 
       };
     }
   });
 
-  document.getElementById('toggle-image').addEventListener('click', (e) => {
-    e.stopPropagation();    // Prevents parent handlers from executing
-    e.preventDefault();     // Prevents any default action{
-  const container = document.getElementById('expandable-image-container');
-  const button = document.getElementById('toggle-image');
-  
-  if (container.style.display === 'none' || container.style.display === '') {
-    container.style.display = 'block';
-    button.textContent = 'Hide Image';
-    //console.log("container.style.display", container.style.display);
-  } else {
-    container.style.display = 'none';
-    button.textContent = 'Show Image';
-    //console.log("container.style.display", container.style.display);
-  }
-});
+
 
 document.getElementById('annotate-button').addEventListener('click', async () => {
     const img = document.getElementById('selected-image');
+    if (!img.src || img.src === "#") { //  if image source is empty or default
+      alert("Please load an image by clicking 'Get Current Image' before starting the annotation.");
+      return; 
+    }
     if (img && model) {
       const imgTensor = tf.browser.fromPixels(img).toFloat();
       const resizedImgTensor = tf.image.resizeBilinear(imgTensor, [inputSize, inputSize]);
