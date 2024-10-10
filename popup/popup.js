@@ -154,12 +154,7 @@ document.getElementById('annotate-button').addEventListener('click', async () =>
       return; 
     }
     if (img && model) {
-      const imgTensor = tf.browser.fromPixels(img).toFloat();
-      const resizedImgTensor = tf.image.resizeBilinear(imgTensor, [inputSize, inputSize]);
-      const expandedImgTensor = resizedImgTensor.expandDims(0);
-      console.log('Image tensor:', imgTensor);
-      console.log('Resized image tensor:', resizedImgTensor);
-      console.log('Expanded image tensor:', expandedImgTensor);
+    
       console.log("originalWidth",ImageOriginalWidth,"originalHeight",ImageOriginalHeight);
       console.log("image",img);
       try {
@@ -182,9 +177,6 @@ document.getElementById('annotate-button').addEventListener('click', async () =>
         displayMessage(`Error during annotation: ${error.message}`);
       }
   
-      imgTensor.dispose();
-      resizedImgTensor.dispose();
-      expandedImgTensor.dispose();
     }
   });
 
@@ -316,14 +308,16 @@ const preprocess = (source, modelWidth, modelHeight) => {
 
     // padding image to square => [n, m] to [n, n], n > m
     const [h, w] = img.shape.slice(0, 2); // get source width and height
-    console.log("slice",img.shape.slice(0, 2));
+    console.log("original shape",img.shape.slice(0, 2));
     const maxSize = Math.max(w, h); // get max size
     const imgPadded = img.pad([
       [0, maxSize - h], // padding y [bottom only]
       [0, maxSize - w], // padding x [right only]
       [0, 0],
     ]);
-
+    console.log("imgPadded shape",imgPadded.shape.slice(0, 2));
+    console.log("maxSize",maxSize);
+    console.log("imgPadded",imgPadded);
     xRatio = maxSize / w; // update xRatio
     yRatio = maxSize / h; // update yRatio
 
@@ -340,9 +334,9 @@ const preprocess = (source, modelWidth, modelHeight) => {
 
 export const detect = async (source, model) => {
   let rendered_boxes = [];
-  console.log("before slicing",model);
+
   const [modelWidth, modelHeight] = model.inputs[0].shape.slice(1, 3); // get model width and height
-  console.log("after slicing");
+  console.log("modelWidth",modelWidth,"modelHeight",modelHeight);
   tf.engine().startScope(); // start scoping tf engine
   const [input, xRatio, yRatio] = preprocess(source, modelWidth, modelHeight); // preprocess image
 
@@ -358,12 +352,13 @@ export const detect = async (source, model) => {
         [
           y1,
           x1,
-          tf.add(y1, h), //y2
-          tf.add(x1, w), //x2
+          tf.add(y1, h), // y2
+          tf.add(x1, w), // x2
         ],
         2
       )
       .squeeze();
+    
   }); // process boxes [y1, x1, y2, x2]
 
   const [scores, classes] = tf.tidy(() => {
@@ -379,8 +374,8 @@ export const detect = async (source, model) => {
   const classes_data = classes.gather(nms, 0).dataSync(); // indexing classes by nms index
   //return [boxes_data, scores_data, classes_data, [xRatio, yRatio]]; // return boxes, scores, classes, and ratios
   //return boxes_data;
-  console.log('before render');
-  rendered_boxes= renderBoxes( boxes_data, scores_data, classes_data, [xRatio, yRatio]); // render boxes
+
+  rendered_boxes= renderBoxes( boxes_data, scores_data, classes_data, [xRatio, yRatio], modelWidth, modelHeight); // render boxes
   return rendered_boxes;
   
   //tf.dispose([res, transRes, boxes, scores, classes, nms]); // clear memory
@@ -390,9 +385,10 @@ export const detect = async (source, model) => {
   //tf.engine().endScope(); // end of scoping
 };
 
-export const renderBoxes = ( boxes_data, scores_data, classes_data, ratios) => {
+export const renderBoxes = ( boxes_data, scores_data, classes_data, ratios, modelWidth, modelHeight) => {
   let boxes = [];
   console.log('scores_data',scores_data);
+  console.log('ratios',ratios); 
   for (let i = 0; i < scores_data.length; ++i) {
     // filter based on class threshold
     // i need to get lables from the yaml file somehow
@@ -400,10 +396,10 @@ export const renderBoxes = ( boxes_data, scores_data, classes_data, ratios) => {
     const score = (scores_data[i] * 100).toFixed(1);
 
     let [y1, x1, y2, x2] = boxes_data.slice(i * 4, (i + 1) * 4);
-    x1 *= ratios[0];
-    x2 *= ratios[0];
-    y1 *= ratios[1];
-    y2 *= ratios[1];
+    x1 *= ratios[0]*(ImageOriginalWidth / modelWidth);;
+    x2 *= ratios[0]*(ImageOriginalWidth / modelWidth);;
+    y1 *= ratios[1]*(ImageOriginalHeight / modelHeight);
+    y2 *= ratios[1]*(ImageOriginalHeight / modelHeight);
     const width = x2 - x1;
     const height = y2 - y1;
     boxes.push({
