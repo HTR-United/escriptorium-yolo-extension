@@ -3,14 +3,17 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     const { apiToken, url } = request;
     try {
       const { imageUrl, originalSize } = await fetchImageUrl(apiToken, url);
-      // send both imageUrl and original size back to popup.js
       chrome.runtime.sendMessage({ action: 'imageURL', imageUrl, originalSize });
+      sendResponse({ success: true }); 
     } catch (error) {
       console.error('Error fetching image URL:', error);
       chrome.runtime.sendMessage({ type: 'ANNOTATION_RESULT', data: `An error occurred: ${error.message}` });
+      sendResponse({ success: false, error: error.message }); 
     }
   }
+  return true; 
 });
+
 
 async function fetchImageUrl(apiToken, url) {
   const regex = /^(?<domain>https?:\/\/[^\/]+)\/document(?:s?)\/(?<document>\d+)\/parts?\/(?<page>\d+)\/edit\/?$/;

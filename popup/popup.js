@@ -126,8 +126,8 @@ document.getElementById('get-current-image').addEventListener('click', () => {
     });
   });
 });
-
-chrome.runtime.onMessage.addListener((request) => {
+chrome.runtime.onMessage.addListener((request, sender) => {
+  if (sender.id === chrome.runtime.id) { 
     if (request.type === 'ANNOTATION_RESULT') {
       displayMessage(request.data);
     } else if (request.action === 'imageURL') {
@@ -137,13 +137,13 @@ chrome.runtime.onMessage.addListener((request) => {
       ImageOriginalWidth = request.originalSize[0];
       ImageOriginalHeight = request.originalSize[1];
       console.log('Original image size:', ImageOriginalWidth, ImageOriginalHeight); 
-      console.log('Original image size:', request.originalSize[0], request.originalSize[1]); 
       img.onload = () => {
         displayMessage('Image loaded successfully');
-
       };
     }
-  });
+  }
+});
+
 
 
 
