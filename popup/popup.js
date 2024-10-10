@@ -12,7 +12,7 @@ let numClass = 41;
 
 function displayMessage(message) {
   const statusMessages = document.getElementById('status-messages');
-  statusMessages.innerHTML += `<p>${message} <span class="checkmark">&#10003;</span></p>`;
+  statusMessages.innerHTML += `<p>${message} <span class="checkmark"></span></p>`;
   statusMessages.scrollTop = statusMessages.scrollHeight;
 }
 
@@ -42,6 +42,13 @@ async function loadModelFromFiles(files) {
   console.log('Model loaded successfully');
   displayMessage('Model loaded successfully');
   document.getElementById('annotate-button').disabled = false;
+
+    // save the folder path in cache
+    const folderPath = files[0].webkitRelativePath.split('/')[0];
+    chrome.storage.local.set({ modelPath: folderPath });
+    console.log('Model loaded and path cached:', folderPath);
+  
+    document.getElementById('model-path').textContent = folderPath; 
 }
 
 async function loadApiToken() {
@@ -82,25 +89,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadCachedModelPath();
 });
 
-document.getElementById('model-files').addEventListener('change', (event) => {
+document.getElementById('model-files').addEventListener('change', async (event) => {
   modelFiles = Array.from(event.target.files); 
 
-  // if any files are selected
   if (modelFiles.length > 0) {
-    const folderPath = modelFiles[0].webkitRelativePath.split('/')[0]; 
-    cacheModelPath(folderPath); 
-    console.log("folderPath",folderPath);
-  }
-});
-
-document.getElementById('load-model').addEventListener('click', async () => {
-  if (modelFiles.length === 0) {
+    const folderPath = modelFiles[0].webkitRelativePath.split('/')[0];
+    // if model in cache
+    chrome.storage.local.get('modelPath', async (result) => {
+      console.log('Cached model path:', result.modelPath);
+      console.log('Selected folder path:', folderPath);
+      if (result.modelPath === folderPath && model) {
+        // modelis already loaded from this path, so no need to reload
+        console.log('Model already loaded from cached path:', folderPath);
+        document.getElementById('model-path').textContent = folderPath;
+        document.getElementById('annotate-button').disabled = false;
+      } else {
+        // load model and cache path since it's not loaded or it's a new path
+        await loadModelFromFiles(modelFiles);
+        cacheModelPath(folderPath); // cache the new model path
+        document.getElementById('model-path').textContent = folderPath;
+      }
+    });
+  } else {
     alert('Please select a folder containing the model files first.');
-    return;
   }
-
-  await loadModelFromFiles(modelFiles); 
 });
+
+
+
 document.getElementById('save-token').addEventListener('click', () => {
   const apiToken = document.getElementById('api-token').value;
   if (!apiToken) {
@@ -111,21 +127,7 @@ document.getElementById('save-token').addEventListener('click', () => {
 });
 
 
-document.getElementById('get-current-image').addEventListener('click', () => {
-  const apiToken = document.getElementById('api-token').value;
-  if (!apiToken) {
-    alert("Please enter your API token.");
-    return;
-  }
 
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    chrome.tabs.sendMessage(tabs[0].id, {
-      action: 'annotate',
-      apiToken,
-      url: tabs[0].url
-    });
-  });
-});
 chrome.runtime.onMessage.addListener((request, sender) => {
   if (sender.id === chrome.runtime.id) { 
     if (request.type === 'ANNOTATION_RESULT') {
@@ -147,38 +149,53 @@ chrome.runtime.onMessage.addListener((request, sender) => {
 
 
 
-document.getElementById('annotate-button').addEventListener('click', async () => {
+chrome.runtime.onMessage.addListener((request, sender) => {
+  if (sender.id === chrome.runtime.id && request.action === 'imageURL') {
     const img = document.getElementById('selected-image');
-    if (!img.src || img.src === "#") { //  if image source is empty or default
-      alert("Please load an image by clicking 'Get Current Image' before starting the annotation.");
-      return; 
+    img.src = request.imageUrl;
+    ImageOriginalWidth = request.originalSize[0];
+    ImageOriginalHeight = request.originalSize[1];
+    const apiToken = document.getElementById('api-token').value;
+    if (!apiToken) {
+      alert("Please enter your API token.");
+      return;
     }
-    if (img && model) {
-    
-      console.log("originalWidth",ImageOriginalWidth,"originalHeight",ImageOriginalHeight);
-      console.log("image",img);
-      try {
-        //const predictions = await model.executeAsync(expandedImgTensor);
-        //console.log('Predictions:', predictions); 
-        //exportPredictions(predictions);
-        //console.log("originalWidth",ImageOriginalWidth,"originalHeight",ImageOriginalHeight);
-        //const blocks = extractBoundingBoxes(predictions, 0.5,ImageOriginalWidth, ImageOriginalHeight); // Use original dimensions here
-        const blocks = await detect(img, model);
-
-
-        const apiToken = document.getElementById('api-token').value;
-        const { pageId, blocksUrl } = await getBlocksUrl();
-        console.log('Blocks:', blocks);
-        await createBlocks(apiToken, blocksUrl, pageId, blocks);
-        displayMessage('Blocks added successfully!');
-        
-      } catch (error) {
-        console.error('Error during model execution:', error);
-        displayMessage(`Error during annotation: ${error.message}`);
+    img.onload = async () => {
+      displayMessage('Image loaded successfully');
+      if (img && model) {
+        try {
+          const blocks = await detect(img, model);
+          const { pageId, blocksUrl } = await getBlocksUrl();
+          await createBlocks(apiToken, blocksUrl, pageId, blocks);
+          displayMessage('Blocks added successfully!');
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            chrome.tabs.sendMessage(tabs[0].id, { action: 'reloadPage' });
+          });
+        } catch (error) {
+          console.error('Error during model execution:', error);
+          displayMessage(`Error during annotation: ${error.message}`);
+        }
       }
-  
-    }
+    };
+  }
+});
+
+
+document.getElementById('annotate-button').addEventListener('click', async () => {
+  const apiToken = document.getElementById('api-token').value;
+  if (!apiToken) {
+    alert("Please enter your API token.");
+    return;
+  }
+
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    chrome.tabs.sendMessage(tabs[0].id, {
+      action: 'annotate',
+      apiToken,
+      url: tabs[0].url
+    });
   });
+});
 
 async function getBlocksUrl() {
   return new Promise((resolve) => {
@@ -188,7 +205,7 @@ async function getBlocksUrl() {
       const match = regex.exec(url);
 
       if (!match) {
-        throw new Error('Invalid URL format.');
+        throw new Error('Please navigate to a valid document page to annotate.');
       }
 
       const { domain, document, page } = match.groups;
@@ -200,6 +217,7 @@ async function getBlocksUrl() {
   });
 }
 
+// first approach to extract bounding boxes, not used in the final version
 function extractBoundingBoxes(predictions, confidenceThreshold = 0.5, originalWidth, originalHeight) {
   const boxes = [];
   const data = predictions.dataSync(); // Extract raw data as a flattened array
@@ -278,12 +296,12 @@ function exportRawData(data,name='Predictions') {
   document.body.removeChild(link);
 }
 
-async function exportPredictions2(predictions) {
+async function exportPredictions(predictions) {
   const rawData = await predictions.dataSync(); //  dataSync() if synchronous extraction is preferred , data() if not
   exportRawData(rawData);
 }
   
-async function exportPredictions(predictions) {
+async function exportDetectionsAndAttributes(predictions) {
   const [batchSize, numAttributes, numDetections] = predictions.shape;
 
   // export each detection 
@@ -372,16 +390,13 @@ export const detect = async (source, model) => {
   const boxes_data = boxes.gather(nms, 0).dataSync(); // indexing boxes by nms index
   const scores_data = scores.gather(nms, 0).dataSync(); // indexing scores by nms index
   const classes_data = classes.gather(nms, 0).dataSync(); // indexing classes by nms index
-  //return [boxes_data, scores_data, classes_data, [xRatio, yRatio]]; // return boxes, scores, classes, and ratios
-  //return boxes_data;
+
 
   rendered_boxes= renderBoxes( boxes_data, scores_data, classes_data, [xRatio, yRatio], modelWidth, modelHeight); // render boxes
   return rendered_boxes;
   
   //tf.dispose([res, transRes, boxes, scores, classes, nms]); // clear memory
-
   //callback();
-
   //tf.engine().endScope(); // end of scoping
 };
 
@@ -406,7 +421,6 @@ export const renderBoxes = ( boxes_data, scores_data, classes_data, ratios, mode
       box: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
       typology: null,
       class: classes_data[i],
-      //confidence: maxProb
     });
   
 

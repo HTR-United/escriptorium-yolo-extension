@@ -19,7 +19,7 @@ async function fetchImageUrl(apiToken, url) {
   const regex = /^(?<domain>https?:\/\/[^\/]+)\/document(?:s?)\/(?<document>\d+)\/parts?\/(?<page>\d+)\/edit\/?$/;
   const match = regex.exec(url);
 
-  if (!match) throw new Error('Invalid URL format.');
+  if (!match) throw new Error('Please navigate to a document page and try again.');
 
   const { domain, document, page } = match.groups;
   const uri = `${domain}/api/documents/${document}/parts/${page}/`;
@@ -39,3 +39,9 @@ async function fetchImageUrl(apiToken, url) {
   console.log('Original size:', originalSize);
   return { imageUrl, originalSize };
 }
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'reloadPage') {
+    // refresh  current page
+    window.location.reload();
+  }
+});
