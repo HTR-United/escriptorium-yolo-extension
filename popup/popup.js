@@ -1,6 +1,7 @@
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
 import '@tensorflow/tfjs-backend-cpu';
+import labels from "./labels.json";
 
 let model = null;
 const inputSize = 960;
@@ -8,7 +9,8 @@ let ImageOriginalWidth = 0;
 let ImageOriginalHeight = 0;
 let modelFilesPath = '';
 let modelFiles = []; 
-let numClass = 41;
+const numClass = labels.length;
+let typeMappings = {};
 
 function displayMessage(message) {
   const statusMessages = document.getElementById('status-messages');
@@ -17,15 +19,16 @@ function displayMessage(message) {
 }
 
 async function initializeBackend() {
-  try {
-    await tf.setBackend('webgl');
-    console.log('WebGL backend initialized');
-  } catch (error) {
-    await tf.setBackend('cpu');
-    console.log('CPU backend initialized');
-  }
+  await tf.setBackend('webgl');
   await tf.ready();
+  
+  if (tf.getBackend() !== 'webgl') {
+    console.warn('WebGL not supported, switching to CPU backend');
+    await tf.setBackend('cpu');
+  }
+  console.log(`Backend initialized to ${tf.getBackend()}`);
 }
+
 
 async function loadModelFromFiles(files) {
   const modelFile = files.find(file => file.name.endsWith('model.json'));
@@ -45,7 +48,13 @@ async function loadModelFromFiles(files) {
 
     // save the folder path in cache
     const folderPath = files[0].webkitRelativePath.split('/')[0];
-    chrome.storage.local.set({ modelPath: folderPath });
+    chrome.storage.local.set({ modelPath: folderPath }, () => {
+      if (chrome.runtime.lastError) {
+          console.error('Error caching model path:', chrome.runtime.lastError);
+      } else {
+          console.log('Model path cached successfully');
+      }
+  });  
     console.log('Model loaded and path cached:', folderPath);
   
     document.getElementById('model-path').textContent = folderPath; 
@@ -93,7 +102,7 @@ document.getElementById('model-files').addEventListener('change', async (event) 
   modelFiles = Array.from(event.target.files); 
 
   if (modelFiles.length > 0) {
-    const folderPath = modelFiles[0].webkitRelativePath.split('/')[0];
+    const folderPath = modelFiles[0].name.split('/')[0];
     // if model in cache
     chrome.storage.local.get('modelPath', async (result) => {
       console.log('Cached model path:', result.modelPath);
@@ -106,7 +115,12 @@ document.getElementById('model-files').addEventListener('change', async (event) 
       } else {
         // load model and cache path since it's not loaded or it's a new path
         await loadModelFromFiles(modelFiles);
-        cacheModelPath(folderPath); // cache the new model path
+        // cache the new model path
+        chrome.storage.local.set({ modelPath: folderPath }, () => {
+          if (chrome.runtime.lastError) {
+              console.error('Error setting model path:', chrome.runtime.lastError);
+          }
+      });
         document.getElementById('model-path').textContent = folderPath;
       }
     });
@@ -164,8 +178,10 @@ chrome.runtime.onMessage.addListener((request, sender) => {
       displayMessage('Image loaded successfully');
       if (img && model) {
         try {
+          const { pageId,documentId, blocksUrl } = await getBlocksUrl();
+          await createTypes(apiToken);
+          await updateValidBlockTypes(apiToken, documentId, typeMappings);
           const blocks = await detect(img, model);
-          const { pageId, blocksUrl } = await getBlocksUrl();
           await createBlocks(apiToken, blocksUrl, pageId, blocks);
           displayMessage('Blocks added successfully!');
           chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -211,6 +227,7 @@ async function getBlocksUrl() {
       const { domain, document, page } = match.groups;
       resolve({ 
         pageId: page, 
+        documentId: document,
         blocksUrl: `${domain}/api/documents/${document}/parts/${page}/blocks/` 
       });
     });
@@ -317,6 +334,59 @@ async function exportDetectionsAndAttributes(predictions) {
   exportRawData(allAttributesData, `AllAttributes_`);
 }  
 
+async function createTypes(apiToken) {
+  for (const label of labels) {
+    try {
+      const response = await fetch('https://escriptorium.inria.fr/api/types/block/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${apiToken}` // Make sure apiToken is defined and valid
+        },
+        body: JSON.stringify({ name: label })
+      });
+      
+      if (response.ok) {
+        const type = await response.json();
+        typeMappings[label] = type.pk; // Map label to pk
+        console.log(`Created type: ${label} with pk: ${type.pk}`);
+      } else {
+        const errorData = await response.json();
+        console.error(`Error creating type ${label}:`, errorData);
+      }
+    } catch (error) {
+      console.error(`Failed to create type ${label}:`, error);
+    }
+  }
+}
+
+
+async function updateValidBlockTypes(apiToken, documentId, typeMappings) {
+  const validBlockTypes = Object.values(typeMappings).map(pk => ({ pk }));
+  
+  try {
+    const response = await fetch(`https://escriptorium.inria.fr/api/documents/${documentId}/`, {
+      method: 'PATCH', 
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${apiToken}`
+      },
+      body: JSON.stringify({ valid_block_types: validBlockTypes })
+    });
+
+    if (response.ok) {
+      console.log('Successfully updated valid block types for document:', documentId);
+      console.log('response',response);
+      console.log('validBlockTypes',validBlockTypes);
+    } else {
+      const errorData = await response.json();
+      console.error('Error updating valid block types:', errorData);
+    }
+  } catch (error) {
+    console.error('Failed to update valid block types:', error);
+  }
+}
+
 
 const preprocess = (source, modelWidth, modelHeight) => {
   let xRatio, yRatio; // ratios for boxes
@@ -419,8 +489,7 @@ export const renderBoxes = ( boxes_data, scores_data, classes_data, ratios, mode
     const height = y2 - y1;
     boxes.push({
       box: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
-      typology: null,
-      class: classes_data[i],
+      typology: typeMappings[labels[classes_data[i]]],
     });
   
 
@@ -436,7 +505,7 @@ export const renderBoxes = ( boxes_data, scores_data, classes_data, ratios, mode
 async function createBlocks(apiToken, uri, pageId, blocks) {
   for (const block of blocks) {
     block.document_part = pageId;
-    
+
     const response = await fetch(uri, {
       method: 'POST',
       headers: {
