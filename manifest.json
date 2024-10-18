@@ -13,6 +13,7 @@
       "https://escriptorium.inria.fr/*"],
         "js": ["scripts/content.js"]
       }
-    ]
+    ],
+    "options_page": "options.html"
   }
   

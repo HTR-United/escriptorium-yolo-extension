@@ -1,26 +1,26 @@
-
 {
-    "version": "0.2.0",
-    "configurations": [
-      {
-        "name": "Launch Chrome with Extension",
-        "type": "chrome",
-        "request": "launch",
-        "url": "https://escriptorium.inria.fr/document/6031/part/529822/edit/", // URL for testing with Webpack dev server
-        "webRoot": "${workspaceFolder}",
-        "runtimeArgs": [
-          "--disable-extensions-except=${workspaceFolder}",
-          "--load-extension=${workspaceFolder}"
-        ],
-        "preLaunchTask": "build-webpack"
-      },
-      {
-        "name": "Attach to Chrome Extension (Background)",
-        "type": "chrome",
-        "request": "attach",
-        "port": 9222,
-        "webRoot": "${workspaceFolder}"
-      }
-    ]
-  }
-  
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Chrome with Extension",
+      "type": "chrome",
+      "request": "launch",
+      "url": "https://escriptorium.inria.fr/document/6031/part/529822/edit/",
+      "webRoot": "${workspaceFolder}",
+      "runtimeArgs": [
+        "--disable-extensions-except=${workspaceFolder}",
+        "--load-extension=${workspaceFolder}",
+        "--remote-debugging-port=9222"
+      ],
+      "preLaunchTask": "build-webpack",
+      "runtimeExecutable": "/usr/bin/google-chrome-stable"
+    },
+    {
+      "name": "Attach to Chrome Extension (Background)",
+      "type": "chrome",
+      "request": "attach",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}"
+    }
+  ]
+}

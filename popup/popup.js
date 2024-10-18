@@ -11,6 +11,92 @@ let modelFilesPath = '';
 let modelFiles = []; 
 const numClass = labels.length;
 let typeMappings = {};
+async function loadModelFromIndexedDB() {
+  try {
+    const db = await initializeIndexedDB();
+    const transaction = db.transaction('modelFilesStore', 'readonly');
+    const store = transaction.objectStore('modelFilesStore');
+    
+    const modelFileRequest = store.get('model.json');
+    const weightFilesRequest = store.getAll();
+    
+    return new Promise((resolve, reject) => {
+      modelFileRequest.onsuccess = () => {
+        const modelFile = modelFileRequest.result;
+        if (!modelFile) {
+          console.error("Model file 'model.json' not found.");
+          reject(new Error("Model file 'model.json' not found."));
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+          const modelJson = JSON.parse(reader.result);
+          console.log('Model JSON parsed successfully:', modelJson);
+
+          weightFilesRequest.onsuccess = () => {
+            console.log('Weight files request succeeded');
+            const weightFiles = weightFilesRequest.result.filter(file => file.name.endsWith('.bin'));
+            console.log('Filtered weight files:', weightFiles);
+
+            if (weightFiles.length === 0) {
+              console.error("No weight files found.");
+              reject(new Error("No weight files found."));
+              return;
+            }
+
+            console.log('Weight files loaded successfully:', weightFiles);
+            resolve({ modelJson, weightFiles });
+          };
+
+          weightFilesRequest.onerror = (event) => {
+            console.error("Error retrieving weight files:", event.target.error);
+            reject(new Error("Failed to retrieve weight files."));
+          };
+        };
+
+        reader.onerror = (event) => {
+          console.error("Error reading model file:", event.target.error);
+          reject(new Error("Failed to read model file."));
+        };
+
+        console.log('Reading model file as text...');
+        reader.readAsText(modelFile.content); // Read model.json as text
+      };
+
+      modelFileRequest.onerror = (event) => {
+        console.error("Error retrieving model file:", event.target.error);
+        reject(new Error("Failed to retrieve model file."));
+      };
+    });
+  } catch (error) {
+    console.error('Error opening IndexedDB:', error);
+    throw new Error("Failed to open IndexedDB.");
+  }
+}
+
+
+
+
+
+
+function initializeIndexedDB() {
+  return new Promise((resolve, reject) => {
+    const openRequest = indexedDB.open('modelFilesDB', 2); 
+
+    openRequest.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('modelFilesStore')) {
+        db.createObjectStore('modelFilesStore', { keyPath: 'name' });
+      }
+    };
+
+    openRequest.onsuccess = (event) => resolve(event.target.result);
+    openRequest.onerror = (event) => reject(event.target.error);
+  });
+}
+
+
 
 function displayMessage(message) {
   const statusMessages = document.getElementById('status-messages');
@@ -28,37 +114,52 @@ async function initializeBackend() {
   }
   console.log(`Backend initialized to ${tf.getBackend()}`);
 }
+async function loadModel() {
+  try {
+    console.log('Loading model files from IndexedDB...');
+    const { modelFile, weightFiles } = await loadModelFromIndexedDB();
+    console.log('Model files loaded:');
+    if (!modelFile || weightFiles.length === 0) {
+      console.warn('No model files found in IndexedDB');
+      displayMessage('No model files found. Please load a model from the options page.');
+      document.getElementById('annotate-button').disabled = true; // Disable if no model
+      return;
+    }
 
+    // Make sure the file content is a Blob
+    const modelBlob = new Blob([modelFile.content], { type: 'application/json' });
+    const weightBlobs = weightFiles.map(file => new Blob([file.content]));
 
-async function loadModelFromFiles(files) {
-  const modelFile = files.find(file => file.name.endsWith('model.json'));
-  const weightFiles = files.filter(file => file.name.endsWith('.bin'));
+    const modelFileReader = new FileReader();
+    modelFileReader.onload = async function () {
+      const modelContent = JSON.parse(modelFileReader.result);
 
-  if (!modelFile || weightFiles.length === 0) {
-    console.error('Model file or weight files are missing');
-    alert('Please ensure the folder contains model.json and .bin files.');
-    return;
+      const weightPromises = weightBlobs.map(blob => {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(new Blob([reader.result]));
+          reader.readAsArrayBuffer(blob); // Read weights as binary
+        });
+      });
+
+      const weights = await Promise.all(weightPromises);
+
+      // Load the model with model content and weight files
+      model = await tf.loadGraphModel(tf.io.browserFiles([new Blob([JSON.stringify(modelContent)]), ...weights]));
+      console.log('Model loaded successfully');
+      displayMessage('Model loaded successfully');
+      document.getElementById('annotate-button').disabled = false;
+    };
+
+    modelFileReader.readAsText(modelBlob); // Read the model.json as text
+  } catch (error) {
+    console.error("Error loading model:", error);
+    displayMessage(`Error loading model: ${error.message}`);
+    document.getElementById('annotate-button').disabled = true; // Disable if an error occurs
   }
-
-  console.log('Loading model from selected files...');
-  model = await tf.loadGraphModel(tf.io.browserFiles([modelFile, ...weightFiles]));
-  console.log('Model loaded successfully');
-  displayMessage('Model loaded successfully');
-  document.getElementById('annotate-button').disabled = false;
-
-    // save the folder path in cache
-    const folderPath = files[0].webkitRelativePath.split('/')[0];
-    chrome.storage.local.set({ modelPath: folderPath }, () => {
-      if (chrome.runtime.lastError) {
-          console.error('Error caching model path:', chrome.runtime.lastError);
-      } else {
-          console.log('Model path cached successfully');
-      }
-  });  
-    console.log('Model loaded and path cached:', folderPath);
-  
-    document.getElementById('model-path').textContent = folderPath; 
 }
+
+
 
 async function loadApiToken() {
   return new Promise((resolve) => {
@@ -94,40 +195,16 @@ async function loadCachedModelPath() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadApiToken(); 
-  await loadCachedModelPath();
+  await loadApiToken();
+  //await loadCachedModelPath();
+
+  // Load models from IndexedDB and populate the dropdown
+  await loadModel();
+
 });
 
-document.getElementById('model-files').addEventListener('change', async (event) => {
-  modelFiles = Array.from(event.target.files); 
 
-  if (modelFiles.length > 0) {
-    const folderPath = modelFiles[0].name.split('/')[0];
-    // if model in cache
-    chrome.storage.local.get('modelPath', async (result) => {
-      console.log('Cached model path:', result.modelPath);
-      console.log('Selected folder path:', folderPath);
-      if (result.modelPath === folderPath && model) {
-        // modelis already loaded from this path, so no need to reload
-        console.log('Model already loaded from cached path:', folderPath);
-        document.getElementById('model-path').textContent = folderPath;
-        document.getElementById('annotate-button').disabled = false;
-      } else {
-        // load model and cache path since it's not loaded or it's a new path
-        await loadModelFromFiles(modelFiles);
-        // cache the new model path
-        chrome.storage.local.set({ modelPath: folderPath }, () => {
-          if (chrome.runtime.lastError) {
-              console.error('Error setting model path:', chrome.runtime.lastError);
-          }
-      });
-        document.getElementById('model-path').textContent = folderPath;
-      }
-    });
-  } else {
-    alert('Please select a folder containing the model files first.');
-  }
-});
+
 
 
 
