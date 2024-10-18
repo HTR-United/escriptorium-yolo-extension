@@ -16,64 +16,55 @@ async function loadModelFromIndexedDB() {
     const db = await initializeIndexedDB();
     const transaction = db.transaction('modelFilesStore', 'readonly');
     const store = transaction.objectStore('modelFilesStore');
-    
-    const modelFileRequest = store.get('model.json');
-    const weightFilesRequest = store.getAll();
-    
-    return new Promise((resolve, reject) => {
-      modelFileRequest.onsuccess = () => {
-        const modelFile = modelFileRequest.result;
-        if (!modelFile) {
-          console.error("Model file 'model.json' not found.");
-          reject(new Error("Model file 'model.json' not found."));
-          return;
-        }
 
-        const reader = new FileReader();
-        reader.onload = () => {
-          const modelJson = JSON.parse(reader.result);
-          console.log('Model JSON parsed successfully:', modelJson);
+    // Retrieve model file and weight files using promises
+    const modelFile = await getRequestAsPromise(store.get('model.json'));
+    const weightFiles = await getRequestAsPromise(store.getAll());
 
-          weightFilesRequest.onsuccess = () => {
-            console.log('Weight files request succeeded');
-            const weightFiles = weightFilesRequest.result.filter(file => file.name.endsWith('.bin'));
-            console.log('Filtered weight files:', weightFiles);
+    // Check if model file exists
+    if (!modelFile) {
+      console.error("Model file 'model.json' not found.");
+      throw new Error("Model file 'model.json' not found.");
+    }
 
-            if (weightFiles.length === 0) {
-              console.error("No weight files found.");
-              reject(new Error("No weight files found."));
-              return;
-            }
+    // Read model.json file content
+    const modelJson = await readFileAsText(modelFile.content);
+    console.log('Model JSON parsed successfully:', modelJson);
 
-            console.log('Weight files loaded successfully:', weightFiles);
-            resolve({ modelJson, weightFiles });
-          };
+    // Filter weight files
+    const filteredWeightFiles = weightFiles.filter(file => file.name.endsWith('.bin'));
+    if (filteredWeightFiles.length === 0) {
+      console.error("No weight files found.");
+      throw new Error("No weight files found.");
+    }
 
-          weightFilesRequest.onerror = (event) => {
-            console.error("Error retrieving weight files:", event.target.error);
-            reject(new Error("Failed to retrieve weight files."));
-          };
-        };
+    console.log('Weight files loaded successfully:', filteredWeightFiles);
+    return { modelJson:modelJson, weightFiles: filteredWeightFiles };
 
-        reader.onerror = (event) => {
-          console.error("Error reading model file:", event.target.error);
-          reject(new Error("Failed to read model file."));
-        };
-
-        console.log('Reading model file as text...');
-        reader.readAsText(modelFile.content); // Read model.json as text
-      };
-
-      modelFileRequest.onerror = (event) => {
-        console.error("Error retrieving model file:", event.target.error);
-        reject(new Error("Failed to retrieve model file."));
-      };
-    });
   } catch (error) {
-    console.error('Error opening IndexedDB:', error);
-    throw new Error("Failed to open IndexedDB.");
+    console.error('Error loading model from IndexedDB:', error);
+    throw error;
   }
 }
+
+// Helper function to promisify IndexedDB requests
+function getRequestAsPromise(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+// Helper function to read file content as text using FileReader
+function readFileAsText(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+}
+
 
 
 
@@ -117,47 +108,45 @@ async function initializeBackend() {
 async function loadModel() {
   try {
     console.log('Loading model files from IndexedDB...');
-    const { modelFile, weightFiles } = await loadModelFromIndexedDB();
-    console.log('Model files loaded:');
-    if (!modelFile || weightFiles.length === 0) {
+    const { modelJson, weightFiles } = await loadModelFromIndexedDB();
+    console.log('Model files loaded:', modelJson);
+    console.log('Weight files:', weightFiles);
+
+    if (!modelJson || weightFiles.length === 0) {
       console.warn('No model files found in IndexedDB');
       displayMessage('No model files found. Please load a model from the options page.');
-      document.getElementById('annotate-button').disabled = true; // Disable if no model
+      document.getElementById('annotate-button').disabled = true;
       return;
     }
 
-    // Make sure the file content is a Blob
-    const modelBlob = new Blob([modelFile.content], { type: 'application/json' });
+    // Convert weight files to Blobs
     const weightBlobs = weightFiles.map(file => new Blob([file.content]));
+    console.log('Model JSON:', modelJson);
 
-    const modelFileReader = new FileReader();
-    modelFileReader.onload = async function () {
-      const modelContent = JSON.parse(modelFileReader.result);
+    const modelFile = new File([modelJson], 'model.json', { type: 'application/json' });
+    console.log('modelJson.weightsManifest[0].paths',modelJson.weightsManifest);
+    const weightFilesAsFiles = modelJson.weightsManifest[0].paths.map((path, index) => {
+      const fileContent = weightFiles[index]?.content; // Use optional chaining to prevent accessing undefined
+      if (!fileContent) {
+        throw new Error(`Weight file for ${path} not found`);
+      }
+      return new File([fileContent], path, { type: 'application/octet-stream' });
+    });
 
-      const weightPromises = weightBlobs.map(blob => {
-        return new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(new Blob([reader.result]));
-          reader.readAsArrayBuffer(blob); // Read weights as binary
-        });
-      });
-
-      const weights = await Promise.all(weightPromises);
-
-      // Load the model with model content and weight files
-      model = await tf.loadGraphModel(tf.io.browserFiles([new Blob([JSON.stringify(modelContent)]), ...weights]));
-      console.log('Model loaded successfully');
-      displayMessage('Model loaded successfully');
-      document.getElementById('annotate-button').disabled = false;
-    };
-
-    modelFileReader.readAsText(modelBlob); // Read the model.json as text
+    console.log('weightFilesAsFiles:', weightFilesAsFiles);
+    
+    // Load the model directly using TensorFlow's browserFiles method
+    model = await tf.loadGraphModel(tf.io.browserFiles([modelFile, ...weightFilesAsFiles]));
+    console.log('Model loaded successfully');
+    displayMessage('Model loaded successfully');
+    document.getElementById('annotate-button').disabled = false;
   } catch (error) {
     console.error("Error loading model:", error);
     displayMessage(`Error loading model: ${error.message}`);
-    document.getElementById('annotate-button').disabled = true; // Disable if an error occurs
+    document.getElementById('annotate-button').disabled = true;
   }
 }
+
 
 
 
