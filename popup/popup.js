@@ -109,36 +109,54 @@ async function loadModel() {
   try {
     console.log('Loading model files from IndexedDB...');
     const { modelJson, weightFiles } = await loadModelFromIndexedDB();
-    console.log('Model files loaded:', modelJson);
-    console.log('Weight files:', weightFiles);
+    const parsedModelJson = JSON.parse(modelJson); 
 
-    if (!modelJson || weightFiles.length === 0) {
+    
+
+    if (!parsedModelJson  || weightFiles.length === 0) {
       console.warn('No model files found in IndexedDB');
       displayMessage('No model files found. Please load a model from the options page.');
       document.getElementById('annotate-button').disabled = true;
       return;
     }
 
-    // Convert weight files to Blobs
-    const weightBlobs = weightFiles.map(file => new Blob([file.content]));
-    console.log('Model JSON:', modelJson);
 
-    const modelFile = new File([modelJson], 'model.json', { type: 'application/json' });
-    console.log('modelJson.weightsManifest[0].paths',modelJson.weightsManifest);
-    const weightFilesAsFiles = modelJson.weightsManifest[0].paths.map((path, index) => {
-      const fileContent = weightFiles[index]?.content; // Use optional chaining to prevent accessing undefined
-      if (!fileContent) {
+
+
+
+    const modelBlob = new Blob([JSON.stringify(parsedModelJson)], { type: 'application/json' });
+    const modelFileBlob = new File([modelBlob], 'model.json', { type: 'application/json' });
+
+    const weightFilesAsFiles = parsedModelJson.weightsManifest[0].paths.map((path) => {
+      // find the correct weight file for the current path
+      const matchingFile = weightFiles.find(file => file.name === path);
+      
+      if (!matchingFile) {
         throw new Error(`Weight file for ${path} not found`);
       }
-      return new File([fileContent], path, { type: 'application/octet-stream' });
+    
+      return new File([matchingFile.content], path, { type: 'application/octet-stream' });
+    });
+    weightFilesAsFiles.forEach((file, index) => {
+      console.log(`Loading weight file: ${file.name} for expected path: ${parsedModelJson.weightsManifest[0].paths[index]}`);
     });
 
-    console.log('weightFilesAsFiles:', weightFilesAsFiles);
-    
+    console.log('Loading model...');
     // Load the model directly using TensorFlow's browserFiles method
-    model = await tf.loadGraphModel(tf.io.browserFiles([modelFile, ...weightFilesAsFiles]));
+    model = await tf.loadGraphModel(tf.io.browserFiles([modelFileBlob, ...weightFilesAsFiles]));
     console.log('Model loaded successfully');
     displayMessage('Model loaded successfully');
+
+        // add the model name to the dropdown after the model is loaded
+        const modelSelect = document.getElementById('model-select');
+        const modelName = parsedModelJson.modelTopology.model_config ? parsedModelJson.modelTopology.model_config.name : "YOLOv8"; 
+        const option = document.createElement('option');
+        option.text = modelName;
+        option.value = modelName; 
+        modelSelect.appendChild(option);
+        modelSelect.value = modelName;
+
+
     document.getElementById('annotate-button').disabled = false;
   } catch (error) {
     console.error("Error loading model:", error);
@@ -493,8 +511,9 @@ export const detect = async (source, model) => {
   console.log("modelWidth",modelWidth,"modelHeight",modelHeight);
   tf.engine().startScope(); // start scoping tf engine
   const [input, xRatio, yRatio] = preprocess(source, modelWidth, modelHeight); // preprocess image
-
+  console.log("input before execute",input);
   const res = model.execute(input); // inference model
+  console.log("res post execute",res);
   const transRes = res.transpose([0, 2, 1]); // transpose result [b, det, n] => [b, n, det]
   const boxes = tf.tidy(() => {
     const w = transRes.slice([0, 0, 2], [-1, -1, 1]); // get width

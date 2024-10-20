@@ -16,3 +16,6 @@ yarn-error.log*
 # Ignore Webpack cache
 .cache/
 releases/
+
+# vscode debug config
+.vscode/
