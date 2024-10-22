@@ -7,19 +7,21 @@ let model = null;
 const inputSize = 960;
 let ImageOriginalWidth = 0;
 let ImageOriginalHeight = 0;
-let modelFilesPath = '';
-let modelFiles = []; 
 const numClass = labels.length;
 let typeMappings = {};
 async function loadModelFromIndexedDB() {
+  let modelJson = null;
+  let weightFiles = null;
+  let modelFile = null;
+
   try {
     const db = await initializeIndexedDB();
     const transaction = db.transaction('modelFilesStore', 'readonly');
     const store = transaction.objectStore('modelFilesStore');
 
-    // Retrieve model file and weight files using promises
-    const modelFile = await getRequestAsPromise(store.get('model.json'));
-    const weightFiles = await getRequestAsPromise(store.getAll());
+    // Retrieve model file and weight files
+    modelFile = await getRequestAsPromise(store.get('model.json'));
+    weightFiles = await getRequestAsPromise(store.getAll());
 
     // Check if model file exists
     if (!modelFile) {
@@ -28,7 +30,7 @@ async function loadModelFromIndexedDB() {
     }
 
     // Read model.json file content
-    const modelJson = await readFileAsText(modelFile.content);
+    modelJson = await readFileAsText(modelFile.content);
     console.log('Model JSON parsed successfully:', modelJson);
 
     // Filter weight files
@@ -39,13 +41,20 @@ async function loadModelFromIndexedDB() {
     }
 
     console.log('Weight files loaded successfully:', filteredWeightFiles);
-    return { modelJson:modelJson, weightFiles: filteredWeightFiles };
+    return { modelJson, weightFiles: filteredWeightFiles };
 
   } catch (error) {
     console.error('Error loading model from IndexedDB:', error);
     throw error;
+  } finally {
+    // free memory
+    modelJson = null;
+    weightFiles = null;
+    modelFile = null;
+    console.log("Cleaned up memory for model loading process.");
   }
 }
+
 
 // Helper function to promisify IndexedDB requests
 function getRequestAsPromise(request) {
@@ -108,8 +117,8 @@ async function initializeBackend() {
 async function loadModel() {
   try {
     console.log('Loading model files from IndexedDB...');
-    const { modelJson, weightFiles } = await loadModelFromIndexedDB();
-    const parsedModelJson = JSON.parse(modelJson); 
+    let  { modelJson, weightFiles } = await loadModelFromIndexedDB();
+    let parsedModelJson = JSON.parse(modelJson); 
 
     
 
@@ -124,12 +133,12 @@ async function loadModel() {
 
 
 
-    const modelBlob = new Blob([JSON.stringify(parsedModelJson)], { type: 'application/json' });
-    const modelFileBlob = new File([modelBlob], 'model.json', { type: 'application/json' });
+    let modelBlob = new Blob([JSON.stringify(parsedModelJson)], { type: 'application/json' });
+    let modelFileBlob = new File([modelBlob], 'model.json', { type: 'application/json' });
 
-    const weightFilesAsFiles = parsedModelJson.weightsManifest[0].paths.map((path) => {
+    let weightFilesAsFiles = parsedModelJson.weightsManifest[0].paths.map((path) => {
       // find the correct weight file for the current path
-      const matchingFile = weightFiles.find(file => file.name === path);
+      let matchingFile = weightFiles.find(file => file.name === path);
       
       if (!matchingFile) {
         throw new Error(`Weight file for ${path} not found`);
@@ -156,13 +165,27 @@ async function loadModel() {
         modelSelect.appendChild(option);
         modelSelect.value = modelName;
 
+    // clear blobs and files from memory
 
+    if (modelBlob && modelBlob.close) modelBlob.close();
+    if (modelFileBlob && modelFileBlob.close) modelFileBlob.close();
+    weightFilesAsFiles.forEach(file => {
+      if (file && file.close) file.close();
+    });
     document.getElementById('annotate-button').disabled = false;
+    modelBlob = null;
+    modelFileBlob = null;
+    weightFilesAsFiles = null;
+    modelJson = null;
+    weightFiles = null;
+    console.log("Disposed of intermediate files to free memory");
+
+
   } catch (error) {
     console.error("Error loading model:", error);
     displayMessage(`Error loading model: ${error.message}`);
     document.getElementById('annotate-button').disabled = true;
-  }
+  } 
 }
 
 
@@ -186,24 +209,9 @@ async function saveApiToken(token) {
   });
 }
 
-async function cacheModelPath(path) {
-  chrome.storage.sync.set({ modelFilesPath: path }, () => {
-    console.log('Model folder path cached');
-  });
-}
-
-async function loadCachedModelPath() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get(['modelFilesPath'], (result) => {
-      modelFilesPath = result.modelFilesPath || '';
-      resolve(modelFilesPath);
-    });
-  });
-}
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadApiToken();
-  //await loadCachedModelPath();
 
   // Load models from IndexedDB and populate the dropdown
   await loadModel();
@@ -511,9 +519,9 @@ export const detect = async (source, model) => {
   console.log("modelWidth",modelWidth,"modelHeight",modelHeight);
   tf.engine().startScope(); // start scoping tf engine
   const [input, xRatio, yRatio] = preprocess(source, modelWidth, modelHeight); // preprocess image
-  console.log("input before execute",input);
+
+
   const res = model.execute(input); // inference model
-  console.log("res post execute",res);
   const transRes = res.transpose([0, 2, 1]); // transpose result [b, det, n] => [b, n, det]
   const boxes = tf.tidy(() => {
     const w = transRes.slice([0, 0, 2], [-1, -1, 1]); // get width
@@ -548,17 +556,20 @@ export const detect = async (source, model) => {
 
 
   rendered_boxes= renderBoxes( boxes_data, scores_data, classes_data, [xRatio, yRatio], modelWidth, modelHeight); // render boxes
+  tf.dispose([res, transRes, boxes, scores, classes, nms]); // clear memory
+  //callback();
+  tf.engine().endScope(); // end of scoping
+  console.log('Tensors disposed to free memory.');
+
+  
   return rendered_boxes;
   
-  //tf.dispose([res, transRes, boxes, scores, classes, nms]); // clear memory
-  //callback();
-  //tf.engine().endScope(); // end of scoping
+
 };
 
 export const renderBoxes = ( boxes_data, scores_data, classes_data, ratios, modelWidth, modelHeight) => {
   let boxes = [];
-  console.log('scores_data',scores_data);
-  console.log('ratios',ratios); 
+
   for (let i = 0; i < scores_data.length; ++i) {
     // filter based on class threshold
     // i need to get lables from the yaml file somehow
