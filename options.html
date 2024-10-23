@@ -17,6 +17,39 @@
       margin-top: 15px;
       display: none;
     }
+    #model-list {
+      list-style-type: none;
+      padding: 0;
+      margin-top: 20px;
+    }
+    #model-list li {
+      padding: 10px;
+      background-color: #fff;
+      margin-bottom: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      display: flex;
+      align-items: center;
+    }
+    #model-list li span {
+      font-weight: 500;
+      color: #343a40;
+    }
+    .action-buttons {
+      display: flex;
+      gap: 10px;
+      margin-left: auto; 
+    }
+    .action-buttons button {
+      border: none;
+      background-color: transparent;
+      color: #dc3545;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .action-buttons button:hover {
+      color: #c82333;
+    }
   </style>
 </head>
 <body>
@@ -32,6 +65,9 @@
 
         <div id="status-message" class="alert" role="alert" style="display: none;"></div>
 
+        <h4>Saved Models</h4>
+        <ul id="model-list">
+        </ul>
       </div>
     </div>
   </div>

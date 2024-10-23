@@ -1,4 +1,3 @@
-
 document.getElementById('model-files').addEventListener('change', async (event) => {
   const files = Array.from(event.target.files);
   console.log('Files selected:', files);
@@ -7,7 +6,14 @@ document.getElementById('model-files').addEventListener('change', async (event) 
   
   if (files.length > 0) {
     showStatusMessage(statusMessage, 'info', 'Files selected, attempting to load the model...');
-    await loadModelFromFiles(files);
+    const modelName = prompt("Please enter a name for this model:", files[0].webkitRelativePath.split('/')[0]);
+    if (modelName) {
+      await loadModelFromFiles(files, modelName);
+      //update the displayed list after saving
+      await displaySavedModels();  
+    } else {
+      showStatusMessage(statusMessage, 'danger', 'Model name is required to save.');
+    }
   }
 });
 
@@ -17,7 +23,7 @@ function showStatusMessage(element, type, message) {
   element.textContent = message;
 }
 
-async function loadModelFromFiles(files) {
+async function loadModelFromFiles(files, modelName) {
   const modelFile = files.find(file => file.name.endsWith('model.json'));
   const weightFiles = files.filter(file => file.name.endsWith('.bin'));
 
@@ -29,12 +35,11 @@ async function loadModelFromFiles(files) {
   }
 
   try {
-    
     console.log('Model loaded:', modelFile);
 
     showStatusMessage(statusMessage, 'success', 'Model successfully loaded. Saving to IndexedDB...');
     
-    await saveModelToIndexedDB(files);
+    await saveModelToIndexedDB(files, modelName);
     showStatusMessage(statusMessage, 'success', 'Model saved in IndexedDB. You can now use it in the popup.');
   } catch (error) {
     console.error('Error loading model:', error);
@@ -42,8 +47,7 @@ async function loadModelFromFiles(files) {
   }
 }
 
-
-async function saveModelToIndexedDB(files) {
+async function saveModelToIndexedDB(files, modelName) {
   try {
     const db = await initializeIndexedDB();
 
@@ -56,11 +60,12 @@ async function saveModelToIndexedDB(files) {
     const store = transaction.objectStore('modelFilesStore');
     
     console.log('Saving files to IndexedDB:', files);
-
+    // added the modelname as attribute to files in indexedDB
     files.forEach(file => {
       const fileData = {
         name: file.name,
-        content: file
+        content: file,
+        modelName 
       };
       store.put(fileData);
     });
@@ -78,6 +83,100 @@ async function saveModelToIndexedDB(files) {
   } catch (error) {
     console.error('Error in saveModelToIndexedDB:', error);
   }
+}
+
+
+async function displaySavedModels() {
+  const modelList = document.getElementById('model-list');
+   // clear list before displaying
+  modelList.innerHTML = ''; 
+  
+  const db = await initializeIndexedDB();
+  const transaction = db.transaction('modelFilesStore', 'readonly');
+  const store = transaction.objectStore('modelFilesStore');
+  const request = store.getAll();
+
+  request.onsuccess = () => {
+    // get unique model names
+    const models = [...new Set(request.result.map(file => file.modelName))];  
+    models.forEach(model => {
+      const listItem = document.createElement('li');
+      
+      const modelInput = document.createElement('input');
+      modelInput.type = 'text';
+      modelInput.value = model;
+      modelInput.classList.add('form-control', 'd-inline');
+      modelInput.style.width = '200px';
+      
+      // save button
+      const saveButton = document.createElement('button');
+      saveButton.textContent = 'Save';
+      saveButton.classList.add('btn', 'btn-sm', 'btn-primary', 'mx-2');
+      saveButton.onclick = async () => {
+        const newName = modelInput.value;
+        await updateModelName(model, newName);
+        await displaySavedModels();  // refresh list after delete
+      };
+
+      // delete button
+      const deleteButton = document.createElement('button');
+      deleteButton.textContent = 'Delete';
+      deleteButton.classList.add('btn', 'btn-sm', 'btn-danger');
+      deleteButton.onclick = async () => {
+        await deleteModel(model);
+        await displaySavedModels();  // refresh after delete
+      };
+
+      listItem.appendChild(modelInput);
+      listItem.appendChild(saveButton);
+      listItem.appendChild(deleteButton);
+      modelList.appendChild(listItem);
+    });
+  };
+}
+
+async function updateModelName(oldName, newName) {
+  const db = await initializeIndexedDB();
+  const transaction = db.transaction('modelFilesStore', 'readwrite');
+  const store = transaction.objectStore('modelFilesStore');
+  
+  const files = await new Promise((resolve, reject) => {
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result.filter(file => file.modelName === oldName));
+    request.onerror = () => reject(request.error);
+  });
+
+  files.forEach(file => {
+    store.put({ ...file, modelName: newName });
+  });
+  
+  await new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+
+  console.log(`Model name updated from "${oldName}" to "${newName}"`);
+}
+
+async function deleteModel(modelName) {
+  const db = await initializeIndexedDB();
+  const transaction = db.transaction('modelFilesStore', 'readwrite');
+  const store = transaction.objectStore('modelFilesStore');
+  
+  const files = await new Promise((resolve, reject) => {
+    const request = store.getAll();
+    request.onsuccess = () => resolve(request.result.filter(file => file.modelName === modelName));
+    request.onerror = () => reject(request.error);
+  });
+
+  files.forEach(file => store.delete(file.name));
+
+  await new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+
+  console.log(`Model "${modelName}" deleted from IndexedDB`);
 }
 
 function initializeIndexedDB() {
@@ -104,3 +203,8 @@ function initializeIndexedDB() {
     };
   });
 }
+
+
+document.addEventListener('DOMContentLoaded', async () => {
+  await displaySavedModels();
+});
