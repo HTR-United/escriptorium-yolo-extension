@@ -44,6 +44,84 @@ async function loadModelNamesFromIndexedDB() {
 
 
 
+async function getExistingValidBlockTypes(apiToken, documentId) {
+  try {
+    const response = await fetch(`https://escriptorium.inria.fr/api/documents/${documentId}/`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${apiToken}`
+      }
+    });
+
+    if (response.ok) {
+      const documentData = await response.json();
+      return documentData.valid_block_types.reduce((acc, type) => {
+        acc[type.name] = type.pk;
+        return acc;
+      }, {});
+    } else {
+      console.error('Error fetching existing valid block types:', await response.json());
+      return {};
+    }
+  } catch (error) {
+    console.error('Failed to fetch existing valid block types:', error);
+    return {};
+  }
+}
+
+async function ensureTypesForDetectedBoxes(apiToken, documentId, classes_data) {
+  const existingTypes = await getExistingValidBlockTypes(apiToken, documentId);
+  const classIndicesArray = Array.from(classes_data);
+  console.log('Existing types:', existingTypes);
+  console.log('classes_data:', classIndicesArray); 
+  console.log('Labels Array:', labels);
+  console.log('Labels Mapped from Classes Data:', classIndicesArray.map(classIndex => labels[classIndex]));
+  
+  typeMappings = { ...existingTypes };
+  const labelsToUse = [...new Set(
+    classIndicesArray
+      .map(classIndex => labels[classIndex]) 
+
+  )];
+
+  console.log('labels used for boxes including th existant:', labelsToUse);
+  
+  const labelsToCreate = [...new Set(
+    classIndicesArray
+      .map(classIndex => labels[classIndex]) 
+      .filter(label => !(label in typeMappings)) 
+  )];
+  console.log('Labels to create:', labelsToCreate);
+
+
+  for (const label of labelsToCreate) {
+    try {
+      const response = await fetch('https://escriptorium.inria.fr/api/types/block/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Token ${apiToken}`
+        },
+        body: JSON.stringify({ name: label })
+      });
+
+      if (response.ok) {
+        const newType = await response.json();
+        typeMappings[label] = newType.pk; 
+        console.log(`Created new type: ${label} with pk: ${newType.pk}`);
+      } else {
+        console.error(`Error creating type ${label}:`, await response.json());
+      }
+    } catch (error) {
+      console.error(`Failed to create type ${label}:`, error);
+    }
+  }
+}
+
+
+
+
 
 
 
@@ -312,10 +390,12 @@ browser.runtime.onMessage.addListener((request, sender) => {
       if (img && model) {
         try {
           const { pageId,documentId, blocksUrl } = await getBlocksUrl();
-          await createTypes(apiToken);
-          await updateValidBlockTypes(apiToken, documentId, typeMappings);
-          const blocks = await detect(img, model);
+          //await createTypes(apiToken);
+
+          const blocks = await detect(img, model,apiToken, documentId);
           model = null;
+          //await ensureTypesForDetectedBoxes(apiToken, documentId,blocks);
+          //await updateValidBlockTypes(apiToken, documentId, typeMappings);
           await createBlocks(apiToken, blocksUrl, pageId, blocks);
           displayMessage('Blocks added successfully!');
           browser.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -571,7 +651,7 @@ const preprocess = (source, modelWidth, modelHeight) => {
 
 
 
-export const detect = async (source, model) => {
+export const detect = async (source, model,apiToken,documentId) => {
   let rendered_boxes = [];
 
   const [modelWidth, modelHeight] = model.inputs[0].shape.slice(1, 3); // get model width and height
@@ -612,7 +692,9 @@ export const detect = async (source, model) => {
   const boxes_data = boxes.gather(nms, 0).dataSync(); // indexing boxes by nms index
   const scores_data = scores.gather(nms, 0).dataSync(); // indexing scores by nms index
   const classes_data = classes.gather(nms, 0).dataSync(); // indexing classes by nms index
-
+  console.log("classes_data",classes_data);
+  await ensureTypesForDetectedBoxes(apiToken, documentId, classes_data);
+  await updateValidBlockTypes(apiToken, documentId, typeMappings);
   rendered_boxes= renderBoxes( boxes_data, scores_data, classes_data, [xRatio, yRatio], modelWidth, modelHeight); // render boxes
   tf.dispose([res, transRes, boxes, scores, classes, nms]); // clear memory
   //callback();
