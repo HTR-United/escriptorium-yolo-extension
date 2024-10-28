@@ -1,3 +1,5 @@
+const browser = window.browser || window.chrome;
+
 document.getElementById('model-files').addEventListener('change', async (event) => {
   const files = Array.from(event.target.files);
   console.log('Files selected:', files);
