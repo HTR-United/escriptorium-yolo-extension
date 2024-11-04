@@ -1,0 +1,41 @@
+image: node:latest
+
+stages:
+  - install
+  - build
+  - package
+
+cache:
+  paths:
+    - node_modules/
+
+install_dependencies:
+  stage: install
+  script:
+    - npm install
+  only:
+    - main
+    - tags
+
+build_project:
+  stage: build
+  script:
+    - npx webpack --config webpack.config.js
+  artifacts:
+    paths:
+      - dist/
+  only:
+    - main
+    - tags
+
+package_extension:
+  stage: package
+  script:
+    - mkdir -p releases
+    - zip -r releases/yolo-image-annotator.zip icons/ popup/ scripts/ styles/ options.html options.js manifest.json dist/
+  artifacts:
+    paths:
+      - releases/yolo-image-annotator.zip
+  only:
+    - main  
+    - tags
