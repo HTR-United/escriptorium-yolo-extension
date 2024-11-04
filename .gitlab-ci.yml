@@ -4,6 +4,7 @@ stages:
   - install
   - build
   - package
+  - release
 
 cache:
   paths:
@@ -41,7 +42,7 @@ package_extension:
   only:
     - main
     - tags
-    
+
 release:
   stage: release
   script:
