@@ -132,8 +132,8 @@ async function loadModelFromIndexedDB(modelName) {
     const store = transaction.objectStore('modelFilesStore');
     const allFiles = await getRequestAsPromise(store.getAll());
 
-    // filter files with modelname
-    const modelFiles = allFiles.filter(file => file.modelName === modelName);
+    // modified the filter to match the saving changes for indexeddb
+    const modelFiles = allFiles.filter(file => file.name.startsWith(`${modelName}_`));
 
     if (!modelFiles || modelFiles.length === 0) throw new Error(`Model files for ${modelName} not found.`);
 
@@ -253,7 +253,8 @@ async function loadModel() {
 
     let weightFilesAsFiles = parsedModelJson.weightsManifest[0].paths.map((path) => {
       // find the correct weight file for the current path
-      let matchingFile = weightFiles.find(file => file.name === path);
+      let prefixedPath = `${selectedModelName}_${path}`;
+      let matchingFile = weightFiles.find(file => file.name === prefixedPath);
       
       if (!matchingFile) {
         throw new Error(`Weight file for ${path} not found`);

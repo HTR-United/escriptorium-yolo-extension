@@ -62,10 +62,10 @@ async function saveModelToIndexedDB(files, modelName) {
     const store = transaction.objectStore('modelFilesStore');
     
     console.log('Saving files to IndexedDB:', files);
-    // added the modelname as attribute to files in indexedDB
     files.forEach(file => {
       const fileData = {
-        name: file.name,
+        // file name needs to be unique in the indexedDB , i combined it with modelName
+        name: `${modelName}_${file.name}`, 
         content: file,
         modelName 
       };

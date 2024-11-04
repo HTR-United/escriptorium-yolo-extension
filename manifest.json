@@ -2,6 +2,11 @@
     "manifest_version": 3,
     "name": "YOLO Image Annotator",
     "version": "1.0",
+    "icons": {
+      "16": "icons/YoloExt16.png",
+      "48": "icons/YoloExt48.png",
+      "128": "icons/YoloExt128.png"
+    },
     "action": {
       "default_popup": "dist/popup.html"
     },
