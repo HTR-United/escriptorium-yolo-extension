@@ -41,3 +41,17 @@ package_extension:
   only:
     - main
     - tags
+    
+release:
+  stage: release
+  script:
+    - |
+      curl --request POST --header "PRIVATE-TOKEN: $CI_JOB_TOKEN" \
+      --data "name=Release $CI_COMMIT_TAG" \
+      --data "tag_name=$CI_COMMIT_TAG" \
+      --data "description=Automated release for $CI_COMMIT_TAG\n\nDownload the attached zip file, extract it, and load it as an unpacked extension in Chrome or Firefox." \
+      --data "assets[links][][name]=Download ZIP" \
+      --data "assets[links][][url]=$CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/download" \
+      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases"
+  only:
+    - tags
