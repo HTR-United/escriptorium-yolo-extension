@@ -31,11 +31,13 @@ build_project:
 package_extension:
   stage: package
   script:
+    - apt-get update && apt-get install -y zip
+    - TAG_NAME=$(git describe --tags --exact-match || echo "latest")  # latest
     - mkdir -p releases
-    - zip -r releases/yolo-image-annotator.zip icons/ popup/ scripts/ styles/ options.html options.js manifest.json dist/
+    - zip -r "releases/yolo-image-annotator-$TAG_NAME.zip" icons/ popup/ scripts/ styles/ options.html options.js manifest.json dist/
   artifacts:
     paths:
-      - releases/yolo-image-annotator.zip
+      - "releases/yolo-image-annotator-*.zip"
   only:
-    - main  
+    - main
     - tags
