@@ -17,6 +17,7 @@
     "@tensorflow/tfjs": "^4.21.0",
     "@tensorflow/tfjs-backend-cpu": "^4.21.0",
     "@tensorflow/tfjs-backend-webgl": "^4.21.0",
+    "js-yaml": "^4.1.0",
     "webpack": "^5.95.0",
     "webpack-cli": "^5.1.4"
   },

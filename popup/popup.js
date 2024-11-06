@@ -1,13 +1,16 @@
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
 import '@tensorflow/tfjs-backend-cpu';
-import labels from "./labels.json";
+//import labels from "./labels.json";
+import yaml from 'js-yaml'; 
 const browser = window.browser || window.chrome;
 let model = null;
 const inputSize = 960;
 let ImageOriginalWidth = 0;
 let ImageOriginalHeight = 0;
-const numClass = labels.length;
+//const numClass = labels.length;
+let numClass;
+let labels = [];
 let typeMappings = {};
 
 async function loadModelNamesFromIndexedDB() {
@@ -140,13 +143,19 @@ async function loadModelFromIndexedDB(modelName) {
     // separate model.json from weight files
     const modelFile = modelFiles.find(file => file.name.endsWith('model.json'));
     const weightFiles = modelFiles.filter(file => file.name.endsWith('.bin'));
-
+    const metadataFile = modelFiles.find(file => file.name.endsWith('metadata.yaml'));
     if (!modelFile) throw new Error(`Model file 'model.json' not found for ${modelName}.`);
-
+    if (!metadataFile) throw new Error(`Metadata file 'metadata.yaml' not found for ${modelName}.`);
+    if (weightFiles.length === 0) throw new Error(`No weight files found for ${modelName}.`);
     // read+parse model.json
     const modelJson = await readFileAsText(modelFile.content);
 
-    if (weightFiles.length === 0) throw new Error(`No weight files found for ${modelName}.`);
+    
+  // metadata.yaml part
+  const metadataYaml = await readFileAsText(metadataFile.content);
+  const metadata = yaml.load(metadataYaml);
+  labels = Object.values(metadata.names);  
+  numClass = labels.length; 
 
     return { modelJson, weightFiles };
 
@@ -159,17 +168,14 @@ async function loadModelFromIndexedDB(modelName) {
 function checkFormCompletion() {
   const apiToken = document.getElementById('api-token').value;
   const selectedModelName = document.getElementById('model-select').value;
-  
   // if model is selected and apitoken , display start button
   const startButton = document.getElementById('annotate-button');
-  console.log("selected Model Name",selectedModelName);
   if (apiToken && selectedModelName) {
     startButton.disabled = false;
   } else {
     startButton.disabled = true;
   }
 }
-
 // Helper function to promisify IndexedDB requests
 function getRequestAsPromise(request) {
   return new Promise((resolve, reject) => {
