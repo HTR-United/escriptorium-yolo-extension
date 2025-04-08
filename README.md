@@ -4,6 +4,9 @@
 This project is part of and funded by [ATRIUM](https://atrium-research.eu/), a European Commission-funded research initiative aimed at advancing frontier knowledge in the arts and humanities.
 
 ![ATRIUM Logo](docs/images/atrium.png)
+
+Funded by the European Union under Grant Agreement n. 101132163. Views and opinions expressed are however those of the author(s) only and do not necessarily reflect those of the European Union. Neither the European Union nor the granting authority can be held responsible for them. 
+
 ![Funding Information](docs/images/funding.png)
 
 The YOLO Image Annotator is a Chrome extension designed for annotating images using the YOLOv8 model. It loads an image/page from an eScriptorium document, processes it, and provides object detection capabilities.
