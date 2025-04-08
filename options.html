@@ -57,11 +57,48 @@
     <div class="card shadow border-0">
       <div class="card-body">
         <h2 class="mb-4 text-center">Upload Model Files</h2>
-        <div class="mb-3 text-center">
-          <a href="https://zenodo.org/communities/yolo_layout_models/records?q=&l=list&p=1&s=10&sort=newest" target="_blank" class="btn btn-outline-primary">
-            Repository of Tested Yolo Models
-          </a>
+        <div class="row">
+          <div class="col-12">
+            <div class="card shadow-sm mb-3">
+              <div class="card-body">
+                <h5 class="card-title">Model Format</h5>
+                <p class="card-text">
+                  Please note that the models you upload must be in <strong>TensorFlow.js (TFJS)</strong> format.
+                  If your model is in a different format, please export it to tfjs first.
+                  For export instructions, refer to the <a href="https://docs.ultralytics.com/integrations/tfjs" target="_blank">Ultralytics documentation</a>.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="card shadow-sm mb-3">
+              <div class="card-body">
+                <h5 class="card-title">File Structure</h5>
+                <p class="card-text">
+                  Your model folder should include <code>model.json</code> and all necessary <code>.bin</code> files.
+                  Optionally, include <code>metadata.yaml</code> for additional model details.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="card shadow-sm mb-3">
+              <div class="card-body">
+                <h5 class="card-title">Download a Tested Model</h5>
+                <p class="card-text">
+                  If you don't have a model ready, you can download a tested model directly from our repository.
+                  This model is ready to use with the extension.
+                </p>
+                <div class="text-center">
+                  <a href="https://zenodo.org/communities/yolo_layout_models/records?q=&l=list&p=1&s=10&sort=newest" target="_blank" class="btn btn-outline-primary">
+                    Repository of Tested Yolo Models
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
+        
         <div class="mb-3">
           <label for="model-files" class="form-label">Select Model Directory:</label>
           <input type="file" id="model-files" class="form-control" webkitdirectory multiple>
